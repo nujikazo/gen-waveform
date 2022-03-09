@@ -1,0 +1,12 @@
+[package]
+name = "gen-waveform"
+version = "0.1.0"
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "1.0.44"
+cpal = "0.13.4"
+clap = { version = "3.1.5", features = ["derive"] }
+rand = "0.8.5"
