@@ -2,6 +2,7 @@ use clap::Parser;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use std::fmt;
 use std::fmt::Display;
+use std::ops::*;
 use std::str::FromStr;
 
 #[derive(Parser, Debug)]
@@ -59,6 +60,89 @@ impl Display for Waveform {
     }
 }
 
+#[derive(Copy, Clone)]
+struct WaveformRequest {
+    frequency: f32,
+    sample_clock: f32,
+    sample_rate: f32,
+}
+
+impl WaveformRequest {
+    fn new(frequency: f32, sample_clock: f32, sample_rate: f32) -> Self {
+        WaveformRequest {
+            frequency: frequency,
+            sample_clock: sample_clock,
+            sample_rate: sample_rate,
+        }
+    }
+
+    fn base_waveform(&self, value: f32) -> f32 {
+        (2.0 * std::f32::consts::PI * self.frequency * self.sample_clock * value / self.sample_rate)
+            .sin()
+    }
+
+    fn tick(&mut self) {
+        self.sample_clock = (self.sample_clock + 1.0) % self.sample_rate;
+    }
+
+    fn sine(&mut self) -> Box<dyn FnMut() -> f32 + Send + Sync + '_> {
+        Box::new(move || {
+            self.tick();
+            self.base_waveform(1.0)
+        }) as Box<dyn FnMut() -> f32 + Send + Sync + '_>
+    }
+
+    fn sawtooth(&mut self) -> Box<dyn FnMut() -> f32 + Send + Sync + '_> {
+        Box::new(move || {
+            self.tick();
+            let mut result = 0f32;
+
+            for n in 1..50 {
+                result += 1.0 / n as f32 * self.base_waveform(n as f32);
+            }
+
+            result
+        }) as Box<dyn FnMut() -> f32 + Send + Sync + '_>
+    }
+
+    fn square(&mut self) -> Box<dyn FnMut() -> f32 + Send + Sync + '_> {
+        Box::new(move || {
+            self.tick();
+            let mut result = 0f32;
+
+            for n in (1..50).step_by(2) {
+                result += 1.0 / n as f32 * self.base_waveform(n as f32);
+            }
+
+            result
+        }) as Box<dyn FnMut() -> f32 + Send + Sync + '_>
+    }
+
+    fn triangle(&mut self) -> Box<dyn FnMut() -> f32 + Send + Sync + '_> {
+        Box::new(move || {
+            self.tick();
+            let mut result = 0f32;
+
+            for n in (1..50 as i32).step_by(2) {
+                let p: f32 = n.pow(2) as f32;
+                result += 1.0 / p as f32 * self.base_waveform(p);
+            }
+
+            result
+        }) as Box<dyn FnMut() -> f32 + Send + Sync + '_>
+    }
+
+    fn white_noise(&mut self) -> Box<dyn FnMut() -> f32 + Send + Sync + '_> {
+        Box::new(move || {
+            self.tick();
+            let seed = rand::random::<u32>();
+            let theta = seed as f32 / std::u32::MAX as f32 * 2f32 * std::f32::consts::PI;
+
+            (2.0 * std::f32::consts::PI * theta * self.sample_clock / self.sample_rate).sin()
+        }) as Box<dyn FnMut() -> f32 + Send + Sync + '_>
+    }
+}
+
 fn main() -> anyhow::Result<()> {
     let host = cpal::default_host();
     let device = host
@@ -86,21 +170,19 @@ fn run<T>(
 where
     T: cpal::Sample,
 {
-    let sample_rate = config.sample_rate.0 as f32;
     let channels = config.channels as usize;
-    let sample_clock = 0f32;
-    let frequency = args.frequency as f32;
+    let mut wr = WaveformRequest::new(args.frequency as f32, 0f32, config.sample_rate.0 as f32);
 
-    let mut gen_fn: Box<dyn FnMut() -> f32 + Send> = match args.waveform {
-        Waveform::SINE => gen_sine(sample_clock, sample_rate, frequency),
-        Waveform::SAWTOOTH => gen_sawtooth(sample_clock, sample_rate, frequency),
-        Waveform::SQUARE => gen_square(sample_clock, sample_rate, frequency),
-        Waveform::TRIANGLE => gen_triangle(sample_clock, sample_rate, frequency),
-        Waveform::NOISE => gen_white_noise(sample_clock, sample_rate),
+    let mut f: Box<dyn FnMut() -> f32 + Send + Sync> = match args.waveform {
+        Waveform::SINE => wr.sine(),
+        Waveform::SAWTOOTH => wr.sawtooth(),
+        Waveform::SQUARE => wr.square(),
+        Waveform::TRIANGLE => wr.triangle(),
+        Waveform::NOISE => wr.white_noise(),
     };
 
     let output_data_fn =
-        move |data: &mut [T], _: &cpal::OutputCallbackInfo| write_data(data, channels, &mut gen_fn);
+        move |data: &mut [T], _: &cpal::OutputCallbackInfo| write_data(data, channels, &mut *f);
     let err_fn = |err: cpal::StreamError| eprintln!("an error occurred on stream: {}", err);
     let stream = device.build_output_stream(config, output_data_fn, err_fn)?;
 
@@ -121,81 +203,4 @@ where
             *sample = value;
         }
     }
-}
-
-fn gen_base_waveform(sample_clock: f32, sample_rate: f32, frequency: f32, v: i32) -> f32 {
-    (2.0 * std::f32::consts::PI * frequency * sample_clock * v as f32 / sample_rate).sin()
-}
-
-fn gen_sine(
-    mut sample_clock: f32,
-    sample_rate: f32,
-    frequency: f32,
-) -> Box<dyn FnMut() -> f32 + Send> {
-    Box::new(move || {
-        sample_clock = (sample_clock + 1.0) % sample_rate;
-        gen_base_waveform(sample_clock, sample_rate, frequency, 1i32)
-    }) as Box<dyn FnMut() -> f32 + Send>
-}
-
-fn gen_sawtooth(
-    mut sample_clock: f32,
-    sample_rate: f32,
-    frequency: f32,
-) -> Box<dyn FnMut() -> f32 + Send> {
-    Box::new(move || {
-        sample_clock = (sample_clock + 1.0) % sample_rate;
-        let mut result = 0f32;
-
-        for n in 1..50 {
-            result += 1.0 / n as f32 * gen_base_waveform(sample_clock, sample_rate, frequency, n);
-        }
-
-        result
-    }) as Box<dyn FnMut() -> f32 + Send>
-}
-
-fn gen_square(
-    mut sample_clock: f32,
-    sample_rate: f32,
-    frequency: f32,
-) -> Box<dyn FnMut() -> f32 + Send> {
-    Box::new(move || {
-        sample_clock = (sample_clock + 1.0) % sample_rate;
-        let mut result = 0f32;
-
-        for n in (1..50).step_by(2) {
-            result += 1.0 / n as f32 * gen_base_waveform(sample_clock, sample_rate, frequency, n)
-        }
-
-        result
-    }) as Box<dyn FnMut() -> f32 + Send>
-}
-
-fn gen_triangle(
-    mut sample_clock: f32,
-    sample_rate: f32,
-    frequency: f32,
-) -> Box<dyn FnMut() -> f32 + Send> {
-    Box::new(move || {
-        sample_clock = (sample_clock + 1.0) % sample_rate;
-        let mut result = 0f32;
-
-        for n in (1..50 as i32).step_by(2) {
-            let p = n.pow(2u32);
-            result += 1.0 / p as f32 * gen_base_waveform(sample_clock, sample_rate, frequency, p);
-        }
-
-        result
-    }) as Box<dyn FnMut() -> f32 + Send>
-}
-
-fn gen_white_noise(mut sample_clock: f32, sample_rate: f32) -> Box<dyn FnMut() -> f32 + Send> {
-    Box::new(move || {
-        sample_clock = (sample_clock + 1.0) % sample_rate;
-        let seed = rand::random::<u32>();
-        let theta = seed as f32 / std::u32::MAX as f32 * 2f32 * std::f32::consts::PI;
-
-        (2.0 * std::f32::consts::PI * theta * sample_clock / sample_rate).sin()
-    }) as Box<dyn FnMut() -> f32 + Send>
 }
