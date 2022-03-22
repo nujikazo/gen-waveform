@@ -76,8 +76,8 @@ impl WaveformRequest {
         }
     }
 
-    fn base_waveform(&self, value: f32) -> f32 {
-        (2.0 * std::f32::consts::PI * self.frequency * self.sample_clock * value / self.sample_rate)
+    fn base_waveform(&self, value: f32, frequency: f32) -> f32 {
+        (2.0 * std::f32::consts::PI * frequency * self.sample_clock * value / self.sample_rate)
             .sin()
     }
 
@@ -88,7 +88,7 @@ impl WaveformRequest {
     fn sine(&mut self) -> Box<dyn FnMut() -> f32 + Send + Sync + '_> {
         Box::new(move || {
             self.tick();
-            self.base_waveform(1.0)
+            self.base_waveform(1.0, self.frequency)
         }) as Box<dyn FnMut() -> f32 + Send + Sync + '_>
     }
 
@@ -97,8 +97,8 @@ impl WaveformRequest {
             self.tick();
             let mut result = 0f32;
 
-            for n in 1..50 {
-                result += 1.0 / n as f32 * self.base_waveform(n as f32);
+            for n in (1..50) {
+                result += 1.0 / n as f32 * self.base_waveform(n as f32, self.frequency);
             }
 
             result
@@ -111,7 +111,7 @@ impl WaveformRequest {
             let mut result = 0f32;
 
             for n in (1..50).step_by(2) {
-                result += 1.0 / n as f32 * self.base_waveform(n as f32);
+                result += 1.0 / n as f32 * self.base_waveform(n as f32, self.frequency);
             }
 
             result
@@ -125,7 +125,7 @@ impl WaveformRequest {
 
             for n in (1..50 as i32).step_by(2) {
                 let p: f32 = n.pow(2) as f32;
-                result += 1.0 / p as f32 * self.base_waveform(p);
+                result += 1.0 / p as f32 * self.base_waveform(p, self.frequency);
             }
 
             result
@@ -138,7 +138,7 @@ impl WaveformRequest {
             let seed = rand::random::<u32>();
             let theta = seed as f32 / std::u32::MAX as f32 * 2f32 * std::f32::consts::PI;
 
-            (2.0 * std::f32::consts::PI * theta * self.sample_clock / self.sample_rate).sin()
+            self.base_waveform(theta, 1.0)
         }) as Box<dyn FnMut() -> f32 + Send + Sync + '_>
     }
 }
@@ -171,18 +171,19 @@ where
     T: cpal::Sample,
 {
     let channels = config.channels as usize;
-    let mut wr = WaveformRequest::new(args.frequency as f32, 0f32, config.sample_rate.0 as f32);
-
-    let mut f: Box<dyn FnMut() -> f32 + Send + Sync> = match args.waveform {
-        Waveform::SINE => wr.sine(),
-        Waveform::SAWTOOTH => wr.sawtooth(),
-        Waveform::SQUARE => wr.square(),
-        Waveform::TRIANGLE => wr.triangle(),
-        Waveform::NOISE => wr.white_noise(),
+    let mut waveform_req =
+        WaveformRequest::new(args.frequency as f32, 0f32, config.sample_rate.0 as f32);
+    let mut waveform_fn: Box<dyn FnMut() -> f32 + Send + Sync> = match args.waveform {
+        Waveform::SINE => waveform_req.sine(),
+        Waveform::SAWTOOTH => waveform_req.sawtooth(),
+        Waveform::SQUARE => waveform_req.square(),
+        Waveform::TRIANGLE => waveform_req.triangle(),
+        Waveform::NOISE => waveform_req.white_noise(),
     };
 
-    let output_data_fn =
-        move |data: &mut [T], _: &cpal::OutputCallbackInfo| write_data(data, channels, &mut *f);
+    let output_data_fn = move |data: &mut [T], _: &cpal::OutputCallbackInfo| {
+        write_data(data, channels, &mut waveform_fn)
+    };
     let err_fn = |err: cpal::StreamError| eprintln!("an error occurred on stream: {}", err);
     let stream = device.build_output_stream(config, output_data_fn, err_fn)?;
 
