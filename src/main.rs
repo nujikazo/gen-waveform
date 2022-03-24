@@ -29,9 +29,9 @@ enum Waveform {
 }
 
 impl FromStr for Waveform {
-    type Err = String;
+    type Err = anyhow::Error;
 
-    fn from_str(s: &str) -> anyhow::Result<Self, Self::Err> {
+    fn from_str(s: &str) -> anyhow::Result<Self, anyhow::Error> {
         match s {
             "sine" => Ok(Waveform::SINE),
             "sin" => Ok(Waveform::SINE),
@@ -43,7 +43,7 @@ impl FromStr for Waveform {
             "squ" => Ok(Waveform::SQUARE),
             "noise" => Ok(Waveform::NOISE),
             "noi" => Ok(Waveform::NOISE),
-            _ => Err(String::from("")),
+            _ => Err(anyhow::anyhow!("Unknown waveform")),
         }
     }
 }
