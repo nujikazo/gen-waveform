@@ -1,9 +1,10 @@
-use clap::Parser;
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use std::fmt;
-use std::fmt::Display;
-use std::ops::*;
-use std::str::FromStr;
+use {
+    clap::Parser,
+    cpal::traits::{DeviceTrait, HostTrait, StreamTrait},
+    std::fmt,
+    std::fmt::Display,
+    std::str::FromStr,
+};
 
 #[derive(Parser, Debug)]
 #[clap(about, version, author)]
@@ -21,9 +22,9 @@ struct Args {
 #[derive(Debug, Copy, Clone)]
 enum Waveform {
     SINE,
-    SQUARE,
-    TRIANGLE,
     SAWTOOTH,
+    TRIANGLE,
+    SQUARE,
     NOISE,
 }
 
@@ -34,13 +35,14 @@ impl FromStr for Waveform {
         match s {
             "sine" => Ok(Waveform::SINE),
             "sin" => Ok(Waveform::SINE),
-            "square" => Ok(Waveform::SQUARE),
-            "squ" => Ok(Waveform::SQUARE),
-            "triangle" => Ok(Waveform::TRIANGLE),
-            "tri" => Ok(Waveform::TRIANGLE),
             "sawtooth" => Ok(Waveform::SAWTOOTH),
             "saw" => Ok(Waveform::SAWTOOTH),
+            "triangle" => Ok(Waveform::TRIANGLE),
+            "tri" => Ok(Waveform::TRIANGLE),
+            "square" => Ok(Waveform::SQUARE),
+            "squ" => Ok(Waveform::SQUARE),
             "noise" => Ok(Waveform::NOISE),
+            "noi" => Ok(Waveform::NOISE),
             _ => Err(String::from("")),
         }
     }
@@ -51,8 +53,8 @@ impl Display for Waveform {
         let s = match &self {
             Waveform::SINE => "sine",
             Waveform::SAWTOOTH => "sawtooth",
-            Waveform::SQUARE => "square",
             Waveform::TRIANGLE => "triangle",
+            Waveform::SQUARE => "square",
             Waveform::NOISE => "noise",
         };
 
@@ -60,7 +62,6 @@ impl Display for Waveform {
     }
 }
 
-#[derive(Copy, Clone)]
 struct WaveformRequest {
     frequency: f32,
     sample_clock: f32,
@@ -70,13 +71,13 @@ struct WaveformRequest {
 impl WaveformRequest {
     fn new(frequency: f32, sample_clock: f32, sample_rate: f32) -> Self {
         WaveformRequest {
-            frequency: frequency,
-            sample_clock: sample_clock,
-            sample_rate: sample_rate,
+            frequency,
+            sample_clock,
+            sample_rate,
         }
     }
 
-    fn base_waveform(&self, value: f32, frequency: f32) -> f32 {
+    fn base_waveform(&mut self, value: f32, frequency: f32) -> f32 {
         (2.0 * std::f32::consts::PI * frequency * self.sample_clock * value / self.sample_rate)
             .sin()
     }
@@ -85,27 +86,27 @@ impl WaveformRequest {
         self.sample_clock = (self.sample_clock + 1.0) % self.sample_rate;
     }
 
-    fn sine(&mut self) -> Box<dyn FnMut() -> f32 + Send + Sync + '_> {
+    fn sine(mut self) -> Box<dyn FnMut() -> f32 + Send> {
         Box::new(move || {
             self.tick();
             self.base_waveform(1.0, self.frequency)
-        }) as Box<dyn FnMut() -> f32 + Send + Sync + '_>
+        })
     }
 
-    fn sawtooth(&mut self) -> Box<dyn FnMut() -> f32 + Send + Sync + '_> {
+    fn sawtooth(mut self) -> Box<dyn FnMut() -> f32 + Send> {
         Box::new(move || {
             self.tick();
             let mut result = 0f32;
 
-            for n in (1..50) {
+            for n in 1..50 {
                 result += 1.0 / n as f32 * self.base_waveform(n as f32, self.frequency);
             }
 
             result
-        }) as Box<dyn FnMut() -> f32 + Send + Sync + '_>
+        })
     }
 
-    fn square(&mut self) -> Box<dyn FnMut() -> f32 + Send + Sync + '_> {
+    fn square(mut self) -> Box<dyn FnMut() -> f32 + Send> {
         Box::new(move || {
             self.tick();
             let mut result = 0f32;
@@ -115,10 +116,10 @@ impl WaveformRequest {
             }
 
             result
-        }) as Box<dyn FnMut() -> f32 + Send + Sync + '_>
+        })
     }
 
-    fn triangle(&mut self) -> Box<dyn FnMut() -> f32 + Send + Sync + '_> {
+    fn triangle(mut self) -> Box<dyn FnMut() -> f32 + Send> {
         Box::new(move || {
             self.tick();
             let mut result = 0f32;
@@ -129,17 +130,17 @@ impl WaveformRequest {
             }
 
             result
-        }) as Box<dyn FnMut() -> f32 + Send + Sync + '_>
+        })
     }
 
-    fn white_noise(&mut self) -> Box<dyn FnMut() -> f32 + Send + Sync + '_> {
+    fn white_noise(mut self) -> Box<dyn FnMut() -> f32 + Send> {
         Box::new(move || {
             self.tick();
             let seed = rand::random::<u32>();
             let theta = seed as f32 / std::u32::MAX as f32 * 2f32 * std::f32::consts::PI;
 
             self.base_waveform(theta, 1.0)
-        }) as Box<dyn FnMut() -> f32 + Send + Sync + '_>
+        })
     }
 }
 
@@ -171,13 +172,13 @@ where
     T: cpal::Sample,
 {
     let channels = config.channels as usize;
-    let mut waveform_req =
+    let waveform_req =
         WaveformRequest::new(args.frequency as f32, 0f32, config.sample_rate.0 as f32);
-    let mut waveform_fn: Box<dyn FnMut() -> f32 + Send + Sync> = match args.waveform {
+    let mut waveform_fn: Box<dyn FnMut() -> f32 + Send> = match args.waveform {
         Waveform::SINE => waveform_req.sine(),
         Waveform::SAWTOOTH => waveform_req.sawtooth(),
-        Waveform::SQUARE => waveform_req.square(),
         Waveform::TRIANGLE => waveform_req.triangle(),
+        Waveform::SQUARE => waveform_req.square(),
         Waveform::NOISE => waveform_req.white_noise(),
     };
 
