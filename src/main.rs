@@ -145,7 +145,7 @@ impl WaveformRequest {
     }
 }
 
-fn main() -> anyhow::Result<()> {
+fn main() -> Result<(), anyhow::Error> {
     let host = cpal::default_host();
     let device = host
         .default_output_device()
