@@ -1,9 +1,11 @@
 use {
     clap::Parser,
     cpal::traits::{DeviceTrait, HostTrait, StreamTrait},
+    std::f32::consts::PI,
     std::fmt,
     std::fmt::Display,
     std::str::FromStr,
+    std::u32::MAX,
 };
 
 #[derive(Parser, Debug)]
@@ -78,18 +80,17 @@ impl WaveformRequest {
     }
 
     fn base_waveform(&mut self, value: f32, frequency: f32) -> f32 {
-        (2.0 * std::f32::consts::PI * frequency * self.sample_clock * value / self.sample_rate)
-            .sin()
+        (2f32 * PI * frequency * self.sample_clock * value / self.sample_rate).sin()
     }
 
     fn tick(&mut self) {
-        self.sample_clock = (self.sample_clock + 1.0) % self.sample_rate;
+        self.sample_clock = (self.sample_clock + 1f32) % self.sample_rate;
     }
 
     fn sine(mut self) -> Box<dyn FnMut() -> f32 + Send> {
         Box::new(move || {
             self.tick();
-            self.base_waveform(1.0, self.frequency)
+            self.base_waveform(1f32, self.frequency)
         })
     }
 
@@ -99,7 +100,7 @@ impl WaveformRequest {
             let mut result = 0f32;
 
             for n in 1..50 {
-                result += 1.0 / n as f32 * self.base_waveform(n as f32, self.frequency);
+                result += 1f32 / n as f32 * self.base_waveform(n as f32, self.frequency);
             }
 
             result
@@ -112,7 +113,7 @@ impl WaveformRequest {
             let mut result = 0f32;
 
             for n in (1..50).step_by(2) {
-                result += 1.0 / n as f32 * self.base_waveform(n as f32, self.frequency);
+                result += 1f32 / n as f32 * self.base_waveform(n as f32, self.frequency);
             }
 
             result
@@ -126,7 +127,7 @@ impl WaveformRequest {
 
             for n in (1..50 as i32).step_by(2) {
                 let p: f32 = n.pow(2) as f32;
-                result += 1.0 / p as f32 * self.base_waveform(p, self.frequency);
+                result += 1f32 / p * self.base_waveform(p, self.frequency);
             }
 
             result
@@ -137,9 +138,9 @@ impl WaveformRequest {
         Box::new(move || {
             self.tick();
             let seed = rand::random::<u32>();
-            let theta = seed as f32 / std::u32::MAX as f32 * 2f32 * std::f32::consts::PI;
+            let theta = seed as f32 / MAX as f32 * 2f32 * PI;
 
-            self.base_waveform(theta, 1.0)
+            self.base_waveform(theta, 1f32)
         })
     }
 }
