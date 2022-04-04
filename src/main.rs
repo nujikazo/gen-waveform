@@ -79,8 +79,8 @@ impl WaveformRequest {
         }
     }
 
-    fn base_waveform(&mut self, value: f32, frequency: f32) -> f32 {
-        (2f32 * PI * frequency * self.sample_clock * value / self.sample_rate).sin()
+    fn base_waveform(&mut self, value: f32, frequency: f32, sample_rate: f32) -> f32 {
+        (2f32 * PI * frequency * self.sample_clock * value / self.sample_rate + sample_rate).sin()
     }
 
     fn tick(&mut self) {
@@ -90,7 +90,7 @@ impl WaveformRequest {
     fn sine(mut self) -> Box<dyn FnMut() -> f32 + Send> {
         Box::new(move || {
             self.tick();
-            self.base_waveform(1f32, self.frequency)
+            self.base_waveform(1f32, self.frequency, 0f32)
         })
     }
 
@@ -100,7 +100,7 @@ impl WaveformRequest {
             let mut result = 0f32;
 
             for n in 1..50 {
-                result += 1f32 / n as f32 * self.base_waveform(n as f32, self.frequency);
+                result += 1f32 / n as f32 * self.base_waveform(n as f32, self.frequency, 0f32);
             }
 
             result
@@ -113,7 +113,7 @@ impl WaveformRequest {
             let mut result = 0f32;
 
             for n in (1..50).step_by(2) {
-                result += 1f32 / n as f32 * self.base_waveform(n as f32, self.frequency);
+                result += 1f32 / n as f32 * self.base_waveform(n as f32, self.frequency, 0f32);
             }
 
             result
@@ -127,7 +127,7 @@ impl WaveformRequest {
 
             for n in (1..50 as i32).step_by(2) {
                 let p: f32 = n.pow(2) as f32;
-                result += 1f32 / p * self.base_waveform(p, self.frequency);
+                result += 1f32 / p * self.base_waveform(p, self.frequency, 0f32);
             }
 
             result
@@ -140,7 +140,7 @@ impl WaveformRequest {
             let seed = rand::random::<u32>();
             let theta = seed as f32 / MAX as f32 * 2f32 * PI;
 
-            self.base_waveform(theta, 1f32)
+            self.base_waveform(1f32, theta, theta)
         })
     }
 }
