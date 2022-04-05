@@ -72,7 +72,7 @@ struct WaveformRequest {
 
 impl WaveformRequest {
     fn new(frequency: f32, sample_clock: f32, sample_rate: f32) -> Self {
-        WaveformRequest {
+        Self {
             frequency,
             sample_clock,
             sample_rate,
