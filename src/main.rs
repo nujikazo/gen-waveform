@@ -147,25 +147,25 @@ impl WaveformRequest {
 
 fn main() -> Result<(), anyhow::Error> {
     let host = cpal::default_host();
-    let device = host
+    let output_device = host
         .default_output_device()
         .expect("failed to find a default output device");
-    println!("Output device: {}", device.name()?);
+    println!("Output device: {}", output_device.name()?);
 
-    let config = device.default_output_config()?;
+    let config = output_device.default_output_config()?;
     println!("Default output config: {:?}", config);
 
     let args = Args::parse();
 
     match config.sample_format() {
-        cpal::SampleFormat::F32 => run::<f32>(&device, &config.into(), args),
-        cpal::SampleFormat::I16 => run::<i16>(&device, &config.into(), args),
-        cpal::SampleFormat::U16 => run::<u16>(&device, &config.into(), args),
+        cpal::SampleFormat::F32 => run::<f32>(&output_device, &config.into(), args),
+        cpal::SampleFormat::I16 => run::<i16>(&output_device, &config.into(), args),
+        cpal::SampleFormat::U16 => run::<u16>(&output_device, &config.into(), args),
     }
 }
 
 fn run<T>(
-    device: &cpal::Device,
+    output_device: &cpal::Device,
     config: &cpal::StreamConfig,
     args: Args,
 ) -> Result<(), anyhow::Error>
@@ -182,12 +182,11 @@ where
         Waveform::SQUARE => waveform_req.square(),
         Waveform::NOISE => waveform_req.white_noise(),
     };
-
-    let output_data_fn = move |data: &mut [T], _: &cpal::OutputCallbackInfo| {
+    let err_fn = |err: cpal::StreamError| eprintln!("an error occurred on stream: {}", err);
+    let output_data_fn = move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
         write_data(data, channels, &mut waveform_fn)
     };
-    let err_fn = |err: cpal::StreamError| eprintln!("an error occurred on stream: {}", err);
-    let stream = device.build_output_stream(config, output_data_fn, err_fn)?;
+    let stream = output_device.build_output_stream(config, output_data_fn, err_fn)?;
 
     stream.play()?;
     std::thread::sleep(std::time::Duration::from_secs(args.time));
@@ -196,9 +195,11 @@ where
     Ok(())
 }
 
-fn write_data<T>(output: &mut [T], channels: usize, next_sample: &mut dyn FnMut() -> f32)
+//fn write_data<T>(output: &mut [T], channels: usize, next_sample: &mut dyn FnMut() -> f32)
+fn write_data<T, F>(output: &mut [T], channels: usize, next_sample: &mut F)
 where
     T: cpal::Sample,
+    F: FnMut() -> f32 + Send,
 {
     for frame in output.chunks_mut(channels) {
         let value: T = cpal::Sample::from::<f32>(&next_sample());
