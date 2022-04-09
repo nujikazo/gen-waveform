@@ -195,7 +195,6 @@ where
     Ok(())
 }
 
-//fn write_data<T>(output: &mut [T], channels: usize, next_sample: &mut dyn FnMut() -> f32)
 fn write_data<T, F>(output: &mut [T], channels: usize, next_sample: &mut F)
 where
     T: cpal::Sample,
