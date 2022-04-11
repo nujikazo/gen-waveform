@@ -200,10 +200,9 @@ where
     T: cpal::Sample,
     F: FnMut() -> f32 + Send,
 {
-    for frame in output.chunks_mut(channels) {
+    for i in (0..output.len()).step_by(channels) {
         let value: T = cpal::Sample::from::<f32>(&next_sample());
-        for sample in frame.iter_mut() {
-            *sample = value;
-        }
+        output[i] = value;
+        output[i + 1] = value;
     }
 }
