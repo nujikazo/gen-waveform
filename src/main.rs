@@ -97,40 +97,30 @@ impl WaveformRequest {
     fn sawtooth(mut self) -> Box<dyn FnMut() -> f32 + Send> {
         Box::new(move || {
             self.tick();
-            let mut result = 0f32;
-
-            for n in 1..50 {
-                result += 1f32 / n as f32 * self.base_waveform(n as f32, self.frequency, 0f32);
-            }
-
-            result
+            2.0 * ((self.frequency * self.sample_clock / self.sample_rate)
+                - ((self.frequency * self.sample_clock / self.sample_rate) + 0.5).floor())
         })
     }
 
     fn square(mut self) -> Box<dyn FnMut() -> f32 + Send> {
         Box::new(move || {
             self.tick();
-            let mut result = 0f32;
-
-            for n in (1..50).step_by(2) {
-                result += 1f32 / n as f32 * self.base_waveform(n as f32, self.frequency, 0f32);
+            if (self.frequency * self.sample_clock / self.sample_rate).sin() >= 0.0 {
+                1.0
+            } else {
+                -1.0
             }
-
-            result
         })
     }
 
     fn triangle(mut self) -> Box<dyn FnMut() -> f32 + Send> {
         Box::new(move || {
             self.tick();
-            let mut result = 0f32;
-
-            for n in (1..50 as i32).step_by(2) {
-                let p: f32 = n.pow(2) as f32;
-                result += 1f32 / p * self.base_waveform(p, self.frequency, 0f32);
-            }
-
-            result
+            2.0 * (2.0
+                * ((self.frequency * self.sample_clock / self.sample_rate)
+                    - ((self.frequency * self.sample_clock / self.sample_rate) + 0.5).floor()))
+            .abs()
+                - 1.0
         })
     }
 
