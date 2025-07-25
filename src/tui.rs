@@ -207,37 +207,74 @@ impl App {
 
     fn draw_waveform(&self, frame: &mut Frame, area: Rect) {
         let samples = self.sample_buffer.lock().unwrap();
-        if samples.is_empty() {
+        if samples.len() < 2 {
+            // Not enough samples to draw
+            let no_data = Paragraph::new("Waiting for waveform data...")
+                .block(Block::default().title("Waveform").borders(Borders::ALL))
+                .alignment(Alignment::Center);
+            frame.render_widget(no_data, area);
             return;
         }
 
-        // Create interpolated points for smoother visualization
-        let points = if samples.len() > 1 {
-            interpolate_samples(&samples, area.width as usize * 2)
-        } else {
-            samples
-                .iter()
-                .enumerate()
-                .map(|(i, &sample)| (i as f64, sample as f64))
-                .collect()
-        };
+        // Get frequency for cycle calculation
+        let params = self.params.lock().unwrap();
+        let frequency = params.frequency;
+        let waveform = params.waveform;
+        drop(params);
+
+        // Create points for visualization
+        // For the chart, we want x to go from 0 to the number of samples
+        let mut points: Vec<(f64, f64)> = Vec::new();
+
+        // Use all samples but space them appropriately
+        for (i, &sample) in samples.iter().enumerate() {
+            points.push((i as f64, sample as f64));
+        }
+
+        // If we have very few points, interpolate to make the waveform smoother
+        if points.len() < 50 && waveform != Waveform::Noise {
+            points = interpolate_waveform(&samples, 200);
+        }
 
         let datasets = vec![Dataset::default()
             .name("Waveform")
             .marker(symbols::Marker::Braille)
             .style(Style::default().fg(Color::Cyan))
+            .graph_type(ratatui::widgets::GraphType::Line)
             .data(&points)];
 
-        let x_bounds = [0.0, points.len() as f64];
-        let y_bounds = [-1.2, 1.2];
+        // Calculate time span for x-axis
+        let time_span = if frequency > 0.0 {
+            format!(
+                "{:.1}ms",
+                (points.len() as f64 / frequency as f64) * 1000.0 / 3.0
+            )
+        } else {
+            "".to_string()
+        };
 
         let chart = Chart::new(datasets)
-            .block(Block::default().title("Waveform").borders(Borders::ALL))
-            .x_axis(Axis::default().bounds(x_bounds).labels(Vec::<Line>::new()))
-            .y_axis(Axis::default().bounds(y_bounds).labels(vec![
-                Line::from("-1.0"),
-                Line::from("0.0"),
-                Line::from("1.0"),
+            .block(
+                Block::default()
+                    .title(format!(
+                        "Waveform ({} @ {:.0}Hz) [{}]",
+                        waveform, frequency, time_span
+                    ))
+                    .borders(Borders::ALL),
+            )
+            .x_axis(
+                Axis::default()
+                    .bounds([0.0, points.len() as f64])
+                    .labels(vec![
+                        Line::from("0"),
+                        Line::from(format!("{}", points.len() / 2)),
+                        Line::from(format!("{}", points.len())),
+                    ]),
+            )
+            .y_axis(Axis::default().bounds([-1.2, 1.2]).labels(vec![
+                Line::from("-1"),
+                Line::from("0"),
+                Line::from("1"),
             ]));
 
         frame.render_widget(chart, area);
@@ -310,37 +347,28 @@ pub fn run_tui(
     Ok(())
 }
 
-/// Interpolate samples to create smoother waveform visualization
-fn interpolate_samples(samples: &[f32], target_points: usize) -> Vec<(f64, f64)> {
-    if samples.len() >= target_points {
-        // Downsample if we have too many points
-        samples
-            .iter()
-            .enumerate()
-            .map(|(i, &sample)| (i as f64, sample as f64))
-            .collect()
-    } else {
-        // Upsample using linear interpolation
-        let mut interpolated = Vec::with_capacity(target_points);
-        let scale = (samples.len() - 1) as f64 / (target_points - 1) as f64;
-
-        for i in 0..target_points {
-            let source_idx = i as f64 * scale;
-            let idx = source_idx.floor() as usize;
-            let fraction = source_idx - idx as f64;
-
-            let sample = if idx + 1 < samples.len() {
-                // Linear interpolation between two adjacent samples
-                let y0 = samples[idx] as f64;
-                let y1 = samples[idx + 1] as f64;
-                y0 + (y1 - y0) * fraction
-            } else {
-                samples[idx] as f64
-            };
-
-            interpolated.push((i as f64, sample));
-        }
-
-        interpolated
+/// Interpolate waveform data for smooth visualization
+fn interpolate_waveform(samples: &[f32], target_points: usize) -> Vec<(f64, f64)> {
+    if samples.is_empty() {
+        return vec![];
     }
+
+    let mut result = Vec::with_capacity(target_points);
+    let step = (samples.len() - 1) as f64 / (target_points - 1) as f64;
+
+    for i in 0..target_points {
+        let pos = i as f64 * step;
+        let idx = pos.floor() as usize;
+        let frac = pos - idx as f64;
+
+        let value = if idx + 1 < samples.len() {
+            samples[idx] as f64 * (1.0 - frac) + samples[idx + 1] as f64 * frac
+        } else {
+            samples[idx] as f64
+        };
+
+        result.push((i as f64, value));
+    }
+
+    result
 }

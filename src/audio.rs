@@ -79,9 +79,44 @@ where
     let channels = config.channels as usize;
     let sample_rate = config.sample_rate.0 as f32;
 
+    // Pre-fill the sample buffer with initial waveform data
+    {
+        let p = params.lock().unwrap();
+        let frequency = p.frequency;
+        drop(p);
+
+        // Calculate how many samples we need for 3 cycles
+        let samples_per_cycle = (sample_rate / frequency) as usize;
+        let total_samples = samples_per_cycle * 3;
+
+        // Create oscillator for pre-filling
+        let mut temp_oscillator = Oscillator::new(
+            Arc::clone(&params),
+            sample_rate,
+            Arc::new(Mutex::new(Vec::new())), // Temporary buffer
+        );
+
+        temp_oscillator.set_interpolation(true);
+        temp_oscillator.set_band_limited(false);
+
+        let mut initial_samples = Vec::with_capacity(300);
+        let downsample = (total_samples / 300).max(1);
+
+        for i in 0..total_samples {
+            let sample = temp_oscillator.next_sample();
+            if i % downsample == 0 {
+                initial_samples.push(sample);
+            }
+        }
+
+        if let Ok(mut buffer) = sample_buffer.lock() {
+            *buffer = initial_samples;
+        }
+    }
+
     let mut oscillator = Oscillator::new(params, sample_rate, sample_buffer);
     oscillator.set_interpolation(true);
-    oscillator.set_band_limited(true);
+    oscillator.set_band_limited(false);
 
     let err_fn = |err| eprintln!("Audio stream error: {}", err);
 

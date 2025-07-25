@@ -159,12 +159,24 @@ impl Oscillator {
 
         let output = sample * volume;
 
-        // Store sample for visualization (downsample for performance)
-        if self.sample_counter.fetch_add(1, Ordering::Relaxed) % 100 == 0 {
+        // Store sample for visualization
+        // We want to capture about 2-3 complete waveform cycles
+        let samples_per_cycle = (self.sample_rate / frequency) as usize;
+        let target_samples = samples_per_cycle * 3; // Show 3 cycles
+
+        // Downsample to fit approximately 200-300 points in the buffer
+        let downsample_rate = (target_samples / 250).max(1);
+
+        let counter = self.sample_counter.fetch_add(1, Ordering::Relaxed);
+
+        if counter % downsample_rate == 0 {
             if let Ok(mut buffer) = self.sample_buffer.try_lock() {
                 buffer.push(output);
-                if buffer.len() > 500 {
-                    buffer.remove(0);
+                // Keep only the latest samples to show recent waveform
+                let max_samples = 300;
+                if buffer.len() > max_samples {
+                    let to_remove = buffer.len() - max_samples;
+                    buffer.drain(0..to_remove);
                 }
             }
         }
