@@ -73,6 +73,10 @@ pub struct Oscillator {
     interpolation_enabled: bool,
     // For band-limiting
     band_limited: bool,
+    // For phase-synchronized sampling
+    last_phase: f32,
+    collecting_cycle: bool,
+    cycle_buffer: Vec<f32>,
 }
 
 impl Oscillator {
@@ -90,18 +94,11 @@ impl Oscillator {
             sample_counter: AtomicUsize::new(0),
             previous_sample: 0.0,
             interpolation_enabled: false,
-            band_limited: true, // Enable band-limiting by default
+            band_limited: true,
+            last_phase: 0.0,
+            collecting_cycle: false,
+            cycle_buffer: Vec::with_capacity(10000),
         }
-    }
-
-    /// Enable or disable interpolation for smoother transitions
-    pub fn set_interpolation(&mut self, enabled: bool) {
-        self.interpolation_enabled = enabled;
-    }
-
-    /// Enable or disable band-limited waveform generation
-    pub fn set_band_limited(&mut self, enabled: bool) {
-        self.band_limited = enabled;
     }
 
     /// Generate the next sample and advance the phase
@@ -140,7 +137,7 @@ impl Oscillator {
 
         // Apply interpolation if enabled (except for noise)
         let sample = if self.interpolation_enabled && waveform != Waveform::Noise {
-            let interpolation_factor = 0.1; // Adjust for smoother/sharper transitions
+            let interpolation_factor = 0.1;
             self.previous_sample + (raw_sample - self.previous_sample) * interpolation_factor
         } else {
             raw_sample
@@ -148,8 +145,14 @@ impl Oscillator {
 
         self.previous_sample = sample;
 
+        let output = sample * volume;
+
+        // Phase-synchronized sample collection for visualization
+        self.collect_visualization_samples(output, frequency);
+
         // Advance phase
         let phase_increment = frequency / self.sample_rate;
+        self.last_phase = self.phase;
         self.phase += phase_increment;
 
         // Wrap phase to prevent overflow
@@ -157,31 +160,60 @@ impl Oscillator {
             self.phase -= 1.0;
         }
 
-        let output = sample * volume;
+        output
+    }
 
-        // Store sample for visualization
-        // We want to capture about 2-3 complete waveform cycles
-        let samples_per_cycle = (self.sample_rate / frequency) as usize;
-        let target_samples = samples_per_cycle * 3; // Show 3 cycles
+    /// Collect samples for visualization, starting from phase 0
+    fn collect_visualization_samples(&mut self, sample: f32, frequency: f32) {
+        // Detect phase wrap (zero crossing from positive to negative)
+        let phase_wrapped = self.last_phase > 0.5 && self.phase < 0.5;
 
-        // Downsample to fit approximately 200-300 points in the buffer
-        let downsample_rate = (target_samples / 250).max(1);
+        if phase_wrapped && !self.collecting_cycle {
+            // Start collecting a new cycle
+            self.collecting_cycle = true;
+            self.cycle_buffer.clear();
+        }
 
-        let counter = self.sample_counter.fetch_add(1, Ordering::Relaxed);
+        if self.collecting_cycle {
+            self.cycle_buffer.push(sample);
 
-        if counter % downsample_rate == 0 {
-            if let Ok(mut buffer) = self.sample_buffer.try_lock() {
-                buffer.push(output);
-                // Keep only the latest samples to show recent waveform
-                let max_samples = 300;
-                if buffer.len() > max_samples {
-                    let to_remove = buffer.len() - max_samples;
-                    buffer.drain(0..to_remove);
+            // Calculate how many samples we need for 3 complete cycles
+            let samples_per_cycle = (self.sample_rate / frequency) as usize;
+            let target_samples = samples_per_cycle * 3;
+
+            // When we have collected enough samples, update the visualization buffer
+            if self.cycle_buffer.len() >= target_samples {
+                self.collecting_cycle = false;
+
+                // Downsample to approximately 300 points for visualization
+                let downsample_rate = (target_samples / 300).max(1);
+                let mut visualization_samples = Vec::with_capacity(300);
+
+                for (i, &s) in self.cycle_buffer.iter().enumerate() {
+                    if i % downsample_rate == 0 {
+                        visualization_samples.push(s);
+                    }
+                }
+
+                // Update the shared buffer
+                if let Ok(mut buffer) = self.sample_buffer.try_lock() {
+                    *buffer = visualization_samples;
                 }
             }
         }
 
-        output
+        // For noise, update more frequently since phase doesn't matter
+        if matches!(self.params.lock().unwrap().waveform, Waveform::Noise) {
+            let counter = self.sample_counter.fetch_add(1, Ordering::Relaxed);
+            if counter % 100 == 0 {
+                if let Ok(mut buffer) = self.sample_buffer.try_lock() {
+                    buffer.push(sample);
+                    if buffer.len() > 300 {
+                        buffer.drain(0..100);
+                    }
+                }
+            }
+        }
     }
 
     fn sine(&self) -> f32 {
